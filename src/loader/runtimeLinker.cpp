@@ -1673,7 +1673,8 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 	// would produce an undersized base_size and LoadSegment would write past the mapping.
 	for (Elf64_Half i = 0; i < ehdr->e_phnum; i++) {
 		if (phdr[i].p_memsz == 0 ||
-		    (phdr[i].p_type != PT_LOAD && phdr[i].p_type != PT_OS_RELRO)) {
+		    (phdr[i].p_type != PT_LOAD && phdr[i].p_type != PT_OS_RELRO &&
+		     phdr[i].p_type != PT_TLS)) {
 			continue;
 		}
 		if (phdr[i].p_align != 0 && (phdr[i].p_align & (phdr[i].p_align - 1)) != 0) {
@@ -1795,11 +1796,16 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 		}
 
 		if (phdr[i].p_type == PT_TLS) {
-			EXIT_IF(phdr[i].p_vaddr >= program->base_size);
+			const uint64_t tls_image_size = GetAlignedSize(phdr + i);
+			if (phdr[i].p_vaddr >= program->base_size ||
+			    tls_image_size > program->base_size - phdr[i].p_vaddr) {
+				EXIT("TLS image is outside the loaded image: p_vaddr=0x%016" PRIx64 "\n",
+				     phdr[i].p_vaddr);
+			}
 
 			program->tls.image_vaddr = phdr[i].p_vaddr + program->base_vaddr;
-			program->tls.init_size   = std::min(phdr[i].p_filesz, GetAlignedSize(phdr + i));
-			program->tls.image_size  = GetAlignedSize(phdr + i);
+			program->tls.init_size   = std::min(phdr[i].p_filesz, tls_image_size);
+			program->tls.image_size  = tls_image_size;
 			program->tls.tcb_offset  = program->tls.image_size;
 
 			LOGF("tls addr = 0x%016" PRIx64 "\n"
