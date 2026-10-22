@@ -175,7 +175,11 @@ void Psf::OpenJson(const std::filesystem::path& file_name) {
 	if (auto kernel = param_json.find("kernel");
 	    kernel != param_json.end() && kernel->is_object()) {
 		if (auto it = kernel->find("flexibleMemorySize"); it != kernel->end()) {
-			m_flexible_memory_size = it->get<uint64_t>();
+			// param.json is guest data: a string/bool/null throws a type_error and kills
+			// the emulator before the game is even loaded.
+			if (it->is_number_unsigned()) {
+				m_flexible_memory_size = it->get<uint64_t>();
+			}
 		}
 	}
 
