@@ -1669,6 +1669,32 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 
 	EXIT_IF(phdr == nullptr || ehdr == nullptr);
 
+	// Validate segment ranges before CalcBaseSize(): a wrapped p_vaddr + aligned p_memsz
+	// would produce an undersized base_size and LoadSegment would write past the mapping.
+	for (Elf64_Half i = 0; i < ehdr->e_phnum; i++) {
+		if (phdr[i].p_memsz == 0 ||
+		    (phdr[i].p_type != PT_LOAD && phdr[i].p_type != PT_OS_RELRO)) {
+			continue;
+		}
+		if (phdr[i].p_align != 0 && (phdr[i].p_align & (phdr[i].p_align - 1)) != 0) {
+			EXIT("segment alignment is not a power of two: p_align=0x%016" PRIx64 "\n",
+			     phdr[i].p_align);
+		}
+		if (phdr[i].p_align != 0 && phdr[i].p_memsz > UINT64_MAX - (phdr[i].p_align - 1)) {
+			EXIT("segment aligned memory size overflows: p_memsz=0x%016" PRIx64 "\n",
+			     phdr[i].p_memsz);
+		}
+		const uint64_t segment_memory_size = GetAlignedSize(phdr + i);
+		if (phdr[i].p_vaddr > UINT64_MAX - segment_memory_size) {
+			EXIT("segment virtual address range overflows: p_vaddr=0x%016" PRIx64 "\n",
+			     phdr[i].p_vaddr);
+		}
+		if (phdr[i].p_filesz > phdr[i].p_memsz) {
+			EXIT("segment file size exceeds its memory size: p_filesz=0x%016" PRIx64 "\n",
+			     phdr[i].p_filesz);
+		}
+	}
+
 	program->base_size                 = CalcBaseSize(ehdr, phdr);
 	constexpr uint64_t GUEST_PAGE_SIZE = 0x4000;
 	EXIT_IF(program->base_size > UINT64_MAX - (GUEST_PAGE_SIZE - 1));
