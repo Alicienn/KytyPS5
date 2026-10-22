@@ -889,6 +889,13 @@ static bool RelocateRecord(uint32_t index, Elf64_Rela* r, Program* program, bool
 		}
 	}
 
+	// r_offset comes from the ELF relocation table: never patch outside the mapped image.
+	if (program->mapped_size < sizeof(uint64_t) || ri.vaddr < program->base_vaddr ||
+	    ri.vaddr - program->base_vaddr > program->mapped_size - sizeof(uint64_t)) {
+		EXIT("relocation target is outside the guest image: vaddr=0x%016" PRIx64 "\n",
+		     ri.vaddr);
+	}
+
 	const bool patched = PatchGuestMemory64(ri.vaddr, value);
 	if (patched && stubbed) {
 		LOGF("Relocate: unresolved %s import patched to stub [%u] [%016" PRIx64 "] <- %016" PRIx64
@@ -1723,6 +1730,12 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 
 	for (Elf64_Half i = 0; i < ehdr->e_phnum; i++) {
 		if (phdr[i].p_memsz != 0 && (phdr[i].p_type == PT_LOAD || phdr[i].p_type == PT_OS_RELRO)) {
+			// p_vaddr comes from the ELF file: reject values that wrap once the program is
+			// relocated to its host base address.
+			if (phdr[i].p_vaddr > UINT64_MAX - program->base_vaddr) {
+				EXIT("segment virtual address overflows: p_vaddr=0x%016" PRIx64 "\n",
+				     phdr[i].p_vaddr);
+			}
 			uint64_t segment_addr        = phdr[i].p_vaddr + program->base_vaddr;
 			uint64_t segment_file_size   = phdr[i].p_filesz;
 			uint64_t segment_memory_size = GetAlignedSize(phdr + i);
